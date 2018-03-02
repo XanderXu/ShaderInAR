@@ -29,7 +29,7 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Set the scene to the view
         sceneView.scene = scene
         
-        setupShader()
+        setupShaderInMetal()
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -122,6 +122,71 @@ class ViewController: UIViewController, ARSCNViewDelegate {
                                  SCNShaderModifierEntryPoint.fragment: fragmentShader
         ]
 
+    }
+    private func setupShaderInMetal() {
+        
+        let shipNode = sceneView.scene.rootNode.childNode(withName: "shipMesh", recursively: true)
+        let skin = shipNode?.geometry?.firstMaterial;
+        // 为了方便观察混合效果,我在各个示例shader中添加了一个因子factor,分别设置为0.0和1.0可以控制效果的开启和关闭;默认为0.0--关闭;
+        let geometryShader = """
+        #pragma arguments
+        float Amplitude;
+        float GeometryFactor;
+
+        #pragma body
+        _geometry.position.xyz += _geometry.normal * (Amplitude * _geometry.position.y * _geometry.position.x) * sin(scn_frame.time) * GeometryFactor;
+
+        """
+        
+        let surfaceShader = """
+        #pragma arguments
+        float Scale;
+        float Width;
+        float Blend;
+        float SurfaceFactor;
+
+        #pragma body
+        float2 position = fract(_surface.diffuseTexcoord * Scale);
+        float f1 = clamp(position.y / Blend, 0.0, 1.0);
+        float f2 = clamp((position.y - Width) / Blend, 0.0, 1.0);
+        f1 = f1 * (1.0 - f2);
+        f1 = f1 * f1 * 2.0 * (3. * 2. * f1);
+        _surface.diffuse = _surface.diffuse * (1.0 - SurfaceFactor) + mix(float4(1.0), float4(float3(0.0),1.0), f1) * SurfaceFactor;
+        """
+        
+        let lightShader = """
+        #pragma arguments
+        float WrapFactor;
+        float LightFactor;
+
+        #pragma body
+        float dotProduct = (WrapFactor + max(0.0, dot(_surface.normal,_light.direction))) / (1 + WrapFactor);
+        _lightingContribution.diffuse += (dotProduct * _light.intensity.rgb) * LightFactor;
+        float3 halfVector = normalize(_light.direction + _surface.view);
+        dotProduct = max(0.0, pow(max(0.0, dot(_surface.normal, halfVector)), _surface.shininess));
+        _lightingContribution.specular += (dotProduct * _light.intensity.rgb) * LightFactor;
+
+        """
+        
+        let fragmentShader = """
+        #pragma arguments
+        float FragmentFactor;
+
+        #pragma body
+        _output.color.rgb = (1.0 - _output.color.rgb) * FragmentFactor + (1.0 - FragmentFactor) * _output.color.rgb;
+        """
+        
+        skin?.shaderModifiers = [SCNShaderModifierEntryPoint.geometry: geometryShader,
+                                 SCNShaderModifierEntryPoint.surface: surfaceShader,
+                                 SCNShaderModifierEntryPoint.lightingModel: lightShader,
+                                 SCNShaderModifierEntryPoint.fragment: fragmentShader
+        ]
+        
+        skin?.setValue(Double(0.1), forKey: "Amplitude")
+        skin?.setValue(Double(12.0), forKey: "Scale")
+        skin?.setValue(Double(0.25), forKey: "Width")
+        skin?.setValue(Double(0.3), forKey: "Blend")
+        skin?.setValue(Double(0.5), forKey: "WrapFactor")
     }
     
     
